@@ -1,0 +1,33 @@
+# Secrets and commercial scanner binaries
+**/credentials.yml
+**/credentials.yaml
+**/*vault*
+*.lic
+*.lic.*
+packages/**
+!packages/
+!packages/windows/
+!packages/linux/
+!packages/windows/.gitkeep
+!packages/linux/.gitkeep
+licenses/**
+!licenses/
+!licenses/.gitkeep
+# Inventory may contain internal hosts/IPs: maintain locally, not in version control
+ansible/inventory/hosts.ini
+ansible/inventory/host_vars/*/
+# Reports, runtime data and transient files
+results/**
+!results/
+!results/raw/
+!results/raw/.gitkeep
+logs/**
+!logs/
+!logs/.gitkeep
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.log
+*.zip
+.DS_Store

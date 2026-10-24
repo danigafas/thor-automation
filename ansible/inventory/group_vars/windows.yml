@@ -1,0 +1,8 @@
+---
+ansible_connection: winrm
+ansible_winrm_transport: ntlm
+ansible_port: 5985
+ansible_winrm_scheme: http
+thor_install_dir: 'C:\THOR-CyberRange\packages\thor-windows'
+thor_results_base_dir: 'C:\THOR-CyberRange\results'
+# See inventory/host_vars/EXAMPLES.md for per-host thor_package.

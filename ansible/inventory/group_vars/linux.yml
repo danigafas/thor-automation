@@ -1,0 +1,5 @@
+---
+ansible_connection: ssh
+ansible_become: true
+thor_install_dir: /opt/thor-cyberrange/packages/thor-linux
+thor_results_base_dir: /opt/thor-cyberrange/results

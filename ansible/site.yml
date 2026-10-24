@@ -1,0 +1,109 @@
+---
+# Generar identificador compartido para esta ejecución
+- name: Inicializar ejecucion THOR
+  hosts: localhost
+  gather_facts: false
+  tags:
+    - init
+    - scan_linux
+    - collect_linux
+    - scan_windows
+    - collect_windows
+  vars:
+    thor_is_recovery: "{{ thor_recovery | default(false) | bool }}"
+
+  tasks:
+    - name: Generar o reutilizar identificador
+      ansible.builtin.set_fact:
+        thor_global_run_id: >-
+          {{
+            thor_requested_run_id
+            | default(now(utc=true, fmt='%Y%m%dT%H%M%SZ'))
+          }}
+        cacheable: false
+
+    - name: Mostrar identificador
+      ansible.builtin.debug:
+        msg: "Ejecucion THOR: {{ thor_global_run_id }}"
+
+    - name: Crear directorio local de control
+      ansible.builtin.file:
+        path: "{{ thor_project_dir }}/logs"
+        state: directory
+        mode: '0700'
+
+    - name: Guardar identificador de ejecucion
+      ansible.builtin.copy:
+        content: "{{ thor_global_run_id }}\n"
+        dest: "{{ thor_project_dir }}/logs/last_run_id"
+        mode: '0600'
+      when: not (thor_is_recovery | bool)
+
+    - name: Crear directorio de control de la ejecucion
+      ansible.builtin.file:
+        path: "{{ thor_project_dir }}/logs/runs/{{ thor_global_run_id }}"
+        state: directory
+        mode: '0700'
+
+    - name: Crear registro inicial de la ejecucion
+      ansible.builtin.copy:
+        content: |
+          {{
+            {
+              'run_id': thor_global_run_id,
+              'created_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'),
+              'status': 'initialized'
+            } | to_nice_json
+          }}
+        dest: "{{ thor_project_dir }}/logs/runs/{{ thor_global_run_id }}/run.json"
+        mode: '0600'
+      when: not (thor_is_recovery | bool)
+
+    - name: Guardar objetivos de la ejecucion
+      ansible.builtin.copy:
+        content: |
+          {{
+            {
+              'run_id': thor_global_run_id,
+              'windows': groups['windows'] | default([]),
+              'linux': groups['linux'] | default([])
+            } | to_nice_json
+          }}
+        dest: "{{ thor_project_dir }}/logs/runs/{{ thor_global_run_id }}/targets.json"
+        mode: '0600'
+      when: not (thor_is_recovery | bool)
+
+    - name: Crear directorio de estados por equipo
+      ansible.builtin.file:
+        path: "{{ thor_project_dir }}/logs/runs/{{ thor_global_run_id }}/hosts"
+        state: directory
+        mode: '0700'
+      when: not (thor_is_recovery | bool)
+
+# ===================================================
+# THOR AUTOMATION - CYBERRANGE
+# ===================================================
+
+# 1. Desplegar THOR en Windows
+- import_playbook: playbooks/01-deploy-windows.yml
+  tags: deploy_windows
+
+# 2. Desplegar THOR en Linux
+- import_playbook: playbooks/01-deploy-linux.yml
+  tags: deploy_linux
+
+# 3. Analizar Windows
+- import_playbook: playbooks/02-scan-windows.yml
+  tags: scan_windows
+
+# 4. Analizar Linux
+- import_playbook: playbooks/02-scan-linux.yml
+  tags: scan_linux
+
+# 5. Recuperar informes Windows
+- import_playbook: playbooks/03-collect-windows.yml
+  tags: collect_windows
+
+# 6. Recuperar informes Linux
+- import_playbook: playbooks/03-collect-linux.yml
+  tags: collect_linux

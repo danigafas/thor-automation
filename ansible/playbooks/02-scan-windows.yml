@@ -1,0 +1,92 @@
+---
+- name: Ejecutar THOR en equipos Windows
+  hosts: windows
+  gather_facts: false
+
+  vars:
+    thor_dir: "{{ thor_install_dir }}"
+
+  tasks:
+
+    - name: Establecer identificador de ejecucion
+      ansible.builtin.set_fact:
+        thor_run_id: >-
+          {{ hostvars['localhost'].thor_global_run_id
+             | default(now(utc=true, fmt='%Y%m%dT%H%M%SZ')) }}
+
+    - name: Establecer directorio de resultados
+      ansible.builtin.set_fact:
+        thor_results_dir: "{{ thor_results_base_dir }}\\{{ thor_run_id }}"
+
+    - name: Comprobar que THOR está desplegado
+      ansible.windows.win_stat:
+        path: "{{ thor_dir }}\\thor64.exe"
+      register: thor_executable
+
+    - name: Detener si falta el ejecutable
+      ansible.builtin.assert:
+        that:
+          - thor_executable.stat.exists
+        fail_msg: "No se encuentra thor64.exe."
+
+    - name: Crear directorio de resultados
+      ansible.windows.win_file:
+        path: "{{ thor_results_dir }}"
+        state: directory
+
+    - name: Ejecutar análisis THOR
+      ansible.windows.win_shell: |
+        & '.\thor64.exe' `
+          -a Filescan `
+          -p 'C:\Windows\System32:NOWALK' `
+          --cpulimit 80 `
+          --jsonv2 `
+          --jsonfile 'thor.json' `
+          --htmlfile 'thor.html' `
+          --logfile 'thor.txt' `
+          -e '{{ thor_results_dir }}'
+      args:
+        chdir: "{{ thor_dir }}"
+      async: 7200
+      poll: 0
+      register: thor_job
+      no_log: true
+
+    - name: Esperar a que finalice THOR
+      ansible.builtin.async_status:
+        jid: "{{ thor_job.ansible_job_id }}"
+      register: thor_status
+      until: thor_status is finished
+      retries: 240
+      delay: 30
+      no_log: true
+
+    - name: Comprobar resultado de ejecución
+      ansible.builtin.assert:
+        that:
+          - thor_status.rc == 0
+        fail_msg: "THOR ha terminado con un error."
+        success_msg: "THOR ha finalizado correctamente."
+
+    - name: Verificar archivos generados
+      ansible.windows.win_stat:
+        path: "{{ thor_results_dir }}\\{{ item }}"
+      loop:
+        - thor.json
+        - thor.html
+        - thor.txt
+      register: thor_reports
+
+    - name: Confirmar que los informes existen y no están vacíos
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.size > 0
+        fail_msg: "Falta un informe o está vacío."
+      loop: "{{ thor_reports.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Mostrar ubicación de los resultados
+      ansible.builtin.debug:
+        msg: "Informes disponibles en {{ thor_results_dir }}"

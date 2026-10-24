@@ -1,0 +1,3 @@
+---
+# Determined from the repository location (unless THOR_BASE_DIR is exported).
+thor_project_dir: "{{ lookup('env', 'THOR_BASE_DIR') | default(playbook_dir | dirname, true) }}"

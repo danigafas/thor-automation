@@ -1,0 +1,110 @@
+---
+- name: Recuperar informes THOR desde Linux
+  hosts: linux
+  gather_facts: false
+
+  vars:
+    thor_local_results: "{{ thor_project_dir }}/results/raw"
+
+    thor_report_files:
+      - thor.json
+      - thor.html
+      - thor.txt
+
+  tasks:
+
+    - name: Comprobar identificador de ejecucion
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].thor_global_run_id is defined
+        fail_msg: >-
+          No existe un identificador global de ejecucion.
+          Ejecuta la recogida mediante site.yml.
+
+    - name: Establecer identificador del analisis
+      ansible.builtin.set_fact:
+        thor_run_id: "{{ hostvars['localhost'].thor_global_run_id }}"
+
+    - name: Establecer rutas
+      ansible.builtin.set_fact:
+        thor_remote_dir: "{{ thor_results_base_dir }}/{{ thor_run_id }}"
+        thor_local_dir: "{{ thor_local_results }}/{{ inventory_hostname }}/{{ thor_run_id }}"
+
+    - name: Comprobar informes remotos
+      ansible.builtin.stat:
+        path: "{{ thor_remote_dir }}/{{ item }}"
+      loop: "{{ thor_report_files }}"
+      register: thor_reports
+
+    - name: Validar informes remotos
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - item.stat.size | default(0) > 0
+        fail_msg: "Falta un informe o esta vacio."
+      loop: "{{ thor_reports.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Crear directorio local
+      ansible.builtin.file:
+        path: "{{ thor_local_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Recuperar informes
+      ansible.builtin.fetch:
+        src: "{{ thor_remote_dir }}/{{ item }}"
+        dest: "{{ thor_local_dir }}/{{ item }}"
+        flat: true
+        validate_checksum: true
+      loop: "{{ thor_report_files }}"
+      no_log: true
+
+    - name: Proteger permisos locales
+      ansible.builtin.file:
+        path: "{{ thor_local_dir }}/{{ item }}"
+        mode: '0600'
+      loop: "{{ thor_report_files }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Generar manifiesto de resultados
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ thor_project_dir }}/scripts/create_manifest.py"
+          - --host
+          - "{{ inventory_hostname }}"
+          - --run-id
+          - "{{ thor_run_id }}"
+          - --results-dir
+          - "{{ thor_local_dir }}"
+      delegate_to: localhost
+      changed_when: true
+
+    - name: Registrar recuperacion correcta
+      ansible.builtin.copy:
+        content: |
+          {{
+            {
+              'host': inventory_hostname,
+              'run_id': thor_run_id,
+              'status': 'collected',
+              'timestamp': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')
+            } | to_nice_json
+          }}
+        dest: "{{ thor_project_dir }}/logs/runs/{{ thor_run_id }}/hosts/{{ inventory_hostname }}.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Confirmar recuperacion
+      ansible.builtin.debug:
+        msg:
+          - "Equipo: {{ inventory_hostname }}"
+          - "Analisis: {{ thor_run_id }}"
+          - "Informes: {{ thor_local_dir }}"
+

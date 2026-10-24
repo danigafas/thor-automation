@@ -1,0 +1,9 @@
+# Add only authorized targets; keep the controller entry.
+[controller]
+localhost ansible_connection=local
+
+[windows]
+# windows01 ansible_host=192.0.2.10
+
+[linux]
+# linux01 ansible_host=192.0.2.20

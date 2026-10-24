@@ -1,0 +1,104 @@
+---
+- name: Ejecutar THOR en equipos Linux
+  hosts: linux
+  gather_facts: false
+
+  tasks:
+
+    - name: Comprobar ejecutable THOR
+      ansible.builtin.stat:
+        path: "{{ thor_install_dir }}/thor-linux-64"
+      register: thor_binary_stat
+
+    - name: Comprobar directorio de licencias
+      ansible.builtin.stat:
+        path: "{{ thor_install_dir }}/licenses"
+      register: thor_licenses_stat
+
+    - name: Validar requisitos
+      ansible.builtin.assert:
+        that:
+          - thor_binary_stat.stat.exists
+          - thor_binary_stat.stat.executable
+          - thor_licenses_stat.stat.isdir | default(false)
+        fail_msg: "THOR no esta correctamente desplegado en {{ inventory_hostname }}"
+
+    - name: Establecer identificador de ejecucion
+      ansible.builtin.set_fact:
+        thor_run_id: >-
+          {{ hostvars['localhost'].thor_global_run_id
+             | default(now(utc=true, fmt='%Y%m%dT%H%M%SZ')) }}
+
+    - name: Establecer directorio de resultados
+      ansible.builtin.set_fact:
+        thor_results_dir: "{{ thor_results_base_dir }}/{{ thor_run_id }}"
+
+    - name: Crear directorio de resultados
+      ansible.builtin.file:
+        path: "{{ thor_results_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Ejecutar analisis THOR
+      ansible.builtin.command:
+        argv:
+          - "{{ thor_install_dir }}/thor-linux-64"
+          - --quick
+          - --cpulimit
+          - "80"
+          - --jsonv2
+          - --jsonfile
+          - thor.json
+          - --htmlfile
+          - thor.html
+          - --logfile
+          - thor.txt
+          - --rebase-dir
+          - "{{ thor_results_dir }}"
+      args:
+        chdir: "{{ thor_install_dir }}"
+      async: 7200
+      poll: 0
+      register: thor_job
+      no_log: true
+
+    - name: Esperar a que finalice THOR
+      ansible.builtin.async_status:
+        jid: "{{ thor_job.ansible_job_id }}"
+      register: thor_status
+      until: thor_status is finished
+      retries: 240
+      delay: 30
+      no_log: true
+
+    - name: Comprobar resultado
+      ansible.builtin.assert:
+        that:
+          - thor_status.rc == 0
+        fail_msg: "THOR ha terminado con un error."
+        success_msg: "THOR ha finalizado correctamente."
+
+    - name: Comprobar informes
+      ansible.builtin.stat:
+        path: "{{ thor_results_dir }}/{{ item }}"
+      loop:
+        - thor.json
+        - thor.html
+        - thor.txt
+      register: thor_reports
+
+    - name: Verificar que los informes no estan vacios
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - item.stat.size | default(0) > 0
+        fail_msg: "Falta un informe o esta vacio."
+      loop: "{{ thor_reports.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Mostrar resultados
+      ansible.builtin.debug:
+        msg: "Informes disponibles en {{ thor_results_dir }}"

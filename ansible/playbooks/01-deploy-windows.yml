@@ -1,0 +1,129 @@
+---
+- name: Desplegar THOR en equipos Windows
+  hosts: windows
+  gather_facts: false
+
+  vars:
+    thor_packages_dir: "{{ thor_project_dir }}/packages/windows"
+    thor_licenses_dir: "{{ thor_project_dir }}/licenses"
+
+    thor_remote_dir: "{{ thor_install_dir }}"
+    thor_remote_zip: "{{ thor_install_dir }}\\{{ thor_package }}"
+
+  tasks:
+
+    # -------------------------------------------------
+    # VALIDACION DE CONFIGURACION
+    # -------------------------------------------------
+
+    - name: Comprobar modalidad de despliegue
+      ansible.builtin.assert:
+        that:
+          - thor_package_mode is defined
+          - thor_package_mode in ['bundled', 'separate']
+          - thor_package is defined
+          - thor_package | basename == thor_package
+          - thor_package is match('^[A-Za-z0-9._-]+\.zip$')
+        fail_msg: "Configuracion de THOR incorrecta."
+
+    - name: Comprobar archivo ZIP local
+      ansible.builtin.stat:
+        path: "{{ thor_packages_dir }}/{{ thor_package }}"
+      delegate_to: localhost
+      register: thor_local_package
+
+    - name: Validar existencia del paquete
+      ansible.builtin.assert:
+        that:
+          - thor_local_package.stat.isreg | default(false)
+        fail_msg: "No existe el paquete THOR seleccionado."
+
+
+    # -------------------------------------------------
+    # DESPLIEGUE
+    # -------------------------------------------------
+
+    - name: Crear directorio remoto
+      ansible.windows.win_file:
+        path: "{{ thor_remote_dir }}"
+        state: directory
+
+    - name: Copiar paquete THOR
+      ansible.windows.win_copy:
+        src: "{{ thor_packages_dir }}/{{ thor_package }}"
+        dest: "{{ thor_remote_zip }}"
+      register: thor_package_copy
+
+    - name: Comprobar ejecutable existente
+      ansible.windows.win_stat:
+        path: "{{ thor_remote_dir }}\\thor64.exe"
+      register: thor_binary_before
+
+    - name: Descomprimir paquete cuando sea necesario
+      community.windows.win_unzip:
+        src: "{{ thor_remote_zip }}"
+        dest: "{{ thor_remote_dir }}"
+      when: >
+        thor_package_copy.changed or
+        not thor_binary_before.stat.exists
+
+    - name: Localizar todas las licencias disponibles
+      ansible.builtin.find:
+        paths: "{{ thor_project_dir }}/licenses"
+        patterns: "*.lic"
+        file_type: file
+      delegate_to: localhost
+      become: false
+      register: thor_available_licenses
+
+    - name: Comprobar que existen licencias
+      ansible.builtin.assert:
+        that:
+          - thor_available_licenses.matched | int > 0
+        fail_msg: "No se encontraron licencias THOR en el controlador"
+
+    - name: Crear directorio de licencias Windows
+      ansible.windows.win_file:
+        path: "{{ thor_install_dir }}\\licenses"
+        state: directory
+
+    - name: Distribuir todas las licencias a Windows
+      ansible.windows.win_copy:
+        src: "{{ item.path }}"
+        dest: "{{ thor_install_dir }}\\licenses\\{{ item.path | basename }}"
+        force: true
+      loop: "{{ thor_available_licenses.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      no_log: true
+
+    # -------------------------------------------------
+    # VERIFICACION
+    # -------------------------------------------------
+
+    - name: Comprobar ejecutable
+      ansible.windows.win_stat:
+        path: "{{ thor_remote_dir }}\\thor64.exe"
+      register: thor_binary
+
+    - name: Comprobar firmas
+      ansible.windows.win_stat:
+        path: "{{ thor_remote_dir }}\\signatures"
+      register: thor_signatures
+
+    - name: Validar despliegue
+      ansible.builtin.assert:
+        that:
+          - thor_binary.stat.exists | default(false)
+          - not (thor_binary.stat.isdir | default(false))
+          - thor_signatures.stat.isdir | default(false)
+        fail_msg: "El despliegue de THOR esta incompleto."
+        success_msg: "THOR desplegado correctamente."
+
+    - name: Mostrar resumen
+      ansible.builtin.debug:
+        msg:
+          - "Equipo: {{ inventory_hostname }}"
+          - "Paquete: {{ thor_package }}"
+          - "Modalidad: {{ thor_package_mode }}"
+          - "Directorio: {{ thor_remote_dir }}"

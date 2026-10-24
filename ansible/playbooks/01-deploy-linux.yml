@@ -1,0 +1,142 @@
+---
+- name: Desplegar THOR en equipos Linux
+  hosts: linux
+  gather_facts: false
+
+  vars:
+    thor_packages_dir: "{{ thor_project_dir }}/packages/linux"
+    thor_remote_zip: "{{ thor_install_dir }}/{{ thor_package }}"
+
+  tasks:
+
+    - name: Validar configuracion del paquete
+      ansible.builtin.assert:
+        that:
+          - thor_package is defined
+          - thor_package | basename == thor_package
+          - thor_package is match('^[A-Za-z0-9._-]+\\.zip$')
+        fail_msg: "No se ha configurado un paquete THOR valido."
+
+    - name: Comprobar que el paquete existe en Ubuntu
+      ansible.builtin.stat:
+        path: "{{ thor_packages_dir }}/{{ thor_package }}"
+      delegate_to: localhost
+      become: false
+      register: thor_local_package
+
+    - name: Validar existencia del paquete
+      ansible.builtin.assert:
+        that:
+          - thor_local_package.stat.isreg | default(false)
+        fail_msg: "No se encuentra el paquete Linux de THOR."
+
+    - name: Crear directorio de instalacion
+      ansible.builtin.file:
+        path: "{{ thor_install_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Crear directorio de resultados
+      ansible.builtin.file:
+        path: "{{ thor_results_base_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Copiar paquete THOR
+      ansible.builtin.copy:
+        src: "{{ thor_packages_dir }}/{{ thor_package }}"
+        dest: "{{ thor_remote_zip }}"
+        owner: root
+        group: root
+        mode: '0600'
+      register: thor_package_copy
+
+    - name: Comprobar ejecutable existente
+      ansible.builtin.stat:
+        path: "{{ thor_install_dir }}/thor-linux-64"
+      register: thor_binary_before
+
+    - name: Descomprimir paquete cuando sea necesario
+      ansible.builtin.unarchive:
+        src: "{{ thor_remote_zip }}"
+        dest: "{{ thor_install_dir }}"
+        remote_src: true
+      when: >
+        thor_package_copy.changed or
+        not thor_binary_before.stat.exists
+
+    # -------------------------------------------------
+    # LICENCIAS
+    # -------------------------------------------------
+
+    - name: Crear directorio de licencias
+      ansible.builtin.file:
+        path: "{{ thor_install_dir }}/licenses"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Localizar todas las licencias disponibles
+      ansible.builtin.find:
+        paths: "{{ thor_project_dir }}/licenses"
+        patterns: "*.lic"
+        file_type: file
+      delegate_to: localhost
+      become: false
+      register: thor_available_licenses
+
+    - name: Comprobar que existen licencias disponibles
+      ansible.builtin.assert:
+        that:
+          - thor_available_licenses.matched | int > 0
+        fail_msg: "No se encontraron licencias THOR en el controlador"
+
+    - name: Distribuir todas las licencias al equipo Linux
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ thor_install_dir }}/licenses/{{ item.path | basename }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop: "{{ thor_available_licenses.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      no_log: true
+
+    - name: Establecer permisos del ejecutable
+      ansible.builtin.file:
+        path: "{{ thor_install_dir }}/thor-linux-64"
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Comprobar ejecutable
+      ansible.builtin.stat:
+        path: "{{ thor_install_dir }}/thor-linux-64"
+      register: thor_binary
+
+    - name: Comprobar firmas
+      ansible.builtin.stat:
+        path: "{{ thor_install_dir }}/signatures"
+      register: thor_signatures
+
+    - name: Validar despliegue
+      ansible.builtin.assert:
+        that:
+          - thor_binary.stat.isreg | default(false)
+          - thor_signatures.stat.isdir | default(false)
+        fail_msg: "El despliegue Linux de THOR esta incompleto."
+        success_msg: "THOR desplegado correctamente en Linux."
+
+    - name: Mostrar resumen
+      ansible.builtin.debug:
+        msg:
+          - "Equipo: {{ inventory_hostname }}"
+          - "Paquete: {{ thor_package }}"
+          - "Directorio: {{ thor_install_dir }}"
+          - "Licencia: pendiente"
