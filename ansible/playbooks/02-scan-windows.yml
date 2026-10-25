@@ -37,8 +37,8 @@
     - name: Ejecutar análisis THOR
       ansible.windows.win_shell: |
         & '.\thor64.exe' `
-          -a Filescan `
-          -p 'C:\Windows\System32:NOWALK' `
+          --allhds `
+          --require-admin `
           --cpulimit 80 `
           --jsonv2 `
           --jsonfile 'thor.json' `
@@ -47,7 +47,7 @@
           -e '{{ thor_results_dir }}'
       args:
         chdir: "{{ thor_dir }}"
-      async: 7200
+      async: 28800
       poll: 0
       register: thor_job
       no_log: true
@@ -57,7 +57,7 @@
         jid: "{{ thor_job.ansible_job_id }}"
       register: thor_status
       until: thor_status is finished
-      retries: 240
+      retries: 960
       delay: 30
       no_log: true
 

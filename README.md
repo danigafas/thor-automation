@@ -6,7 +6,7 @@ Ansible-based orchestration of **authorized** Nextron THOR scans on Windows and 
 
 ## Status
 
-Version **1.0 (publication draft)**. The original implementation completed an end-to-end test with **one Windows and one Linux host** on 24 Oct 2026. The portable copy and configuration templates have passed syntax/static checks; **70–80 host operation has not been load-tested**. Review scanner options and license compatibility before use.
+Version **1.1 (publication draft)**. The original implementation completed an end-to-end test with **one Windows and one Linux host** on 24 Oct 2026. The portable copy and configuration templates have passed syntax/static checks; **70–80 host operation has not been load-tested**. Review scanner options and license compatibility before use.
 
 ## Requirements
 
@@ -41,7 +41,7 @@ The repository can live anywhere; paths are derived from the location of `thor-a
 ./thor-automation.sh
 ```
 
-Prompts for the Ansible Vault password, executes the six deploy/scan/collect plays, then saves outputs to:
+Prompts for the Ansible Vault password, executes separate Windows and Linux deploy/scan/collect stages (one Vault prompt), then saves outputs to:
 
 ```text
 results/raw/<host>/<UTC-run-id>/thor.json
@@ -74,11 +74,11 @@ This does **not** rerun THOR. Ensure remote reports are still present for the sp
 
 ## Operational and security limitations
 
-- The original pipeline was tested with 2 endpoints; scaling, CPU/load and network transfer must be validated for the intended environment. Default Ansible `forks=5`.
-- Runs currently execute OS stages sequentially (Windows deploy, Linux deploy, Windows scan, Linux scan, collections), not a synchronized fleet-wide dispatch.
+- The original v1.0 pipeline was tested with 2 endpoints. The broader v1.1 scans and split execution have only passed static validation in the lab; scaling, CPU/load and network transfer must be validated for the intended environment. Default Ansible `forks=5`.
+- Windows and Linux stages execute separately, in order. If the Windows Ansible call fails, the Linux call is still attempted. Within each OS group, execution remains subject to Ansible play failure semantics.
 - The run's `targets.json` snapshots the inventory groups; it does **not** account for `--limit`, so filtered runs can report unprocessed hosts as unknown.
 - Hosts with no collected state, no error event and missing report are shown as `SIN ESTADO`; `run.json` initializes but is not updated to a terminal overall status.
-- Scanner invocation is tailored to the test setup (including Windows scan of `C:\Windows\System32:NOWALK` and Linux `--quick`); review and tune scope **before operating**.
+- Scanner defaults now use normal (not quick) scanning: Windows uses `--allhds --require-admin`, Linux uses `--require-admin`. These request broad checks including process and rootkit modules, subject to THOR configuration, OS limitations, permissions and licensing. Scans are **not** forensic acquisition or proof of total coverage. Validate real module execution in THOR logs before operational use. Timeout is 8 hours per endpoint.
 - Every available `.lic` is copied to each scanner folder; investigate a host-scoped license mapping for restricted deployments. Existing licenses on hosts are not removed automatically.
 - Restrict access to all reports and controller logs, which may contain machine and security details.
 
